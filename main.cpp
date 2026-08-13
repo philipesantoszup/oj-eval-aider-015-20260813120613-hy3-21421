@@ -13,8 +13,8 @@ const int NUM_BUCKETS = 100003;
 const char* DIR_FILE = "dir.dat";
 const char* REC_FILE = "records.dat";
 
-static char dir_buf[65536];
-static char rec_buf[65536];
+static char dir_buf[262144];
+static char rec_buf[262144];
 
 #pragma pack(push, 1)
 struct Record {
@@ -46,6 +46,9 @@ bool index_equal(const Record& rec, const string& index) {
 fstream rec_file;
 fstream dir_file;
 
+vector<int> dir_heads(NUM_BUCKETS, -1);
+int rec_count = 0;
+
 void init_files() {
     dir_file.rdbuf()->pubsetbuf(dir_buf, sizeof(dir_buf));
     dir_file.open(DIR_FILE, ios::in | ios::out | ios::binary);
@@ -58,6 +61,9 @@ void init_files() {
         create.close();
         dir_file.open(DIR_FILE, ios::in | ios::out | ios::binary);
     }
+    dir_file.read(reinterpret_cast<char*>(dir_heads.data()), NUM_BUCKETS * sizeof(int));
+    dir_file.clear();
+
     rec_file.rdbuf()->pubsetbuf(rec_buf, sizeof(rec_buf));
     rec_file.open(REC_FILE, ios::in | ios::out | ios::binary);
     if (!rec_file) {
@@ -65,27 +71,28 @@ void init_files() {
         create.close();
         rec_file.open(REC_FILE, ios::in | ios::out | ios::binary);
     }
-    dir_file.clear();
+    rec_file.seekg(0, ios::end);
+    streampos len = rec_file.tellg();
+    rec_count = static_cast<int>(len / sizeof(Record));
+    rec_file.seekg(0, ios::beg);
     rec_file.clear();
 }
 
 int get_bucket_head(int bucket) {
-    int head;
-    dir_file.seekg(bucket * sizeof(int), ios::beg);
-    dir_file.read(reinterpret_cast<char*>(&head), sizeof(int));
-    return head;
+    return dir_heads[bucket];
 }
 
 void set_bucket_head(int bucket, int head) {
+    dir_heads[bucket] = head;
     dir_file.seekp(bucket * sizeof(int), ios::beg);
     dir_file.write(reinterpret_cast<const char*>(&head), sizeof(int));
 }
 
 int append_record(const Record& rec) {
-    rec_file.seekp(0, ios::end);
-    streampos pos = rec_file.tellp();
-    int id = static_cast<int>(pos / sizeof(Record));
+    int id = rec_count;
+    rec_file.seekp(id * sizeof(Record), ios::beg);
     rec_file.write(reinterpret_cast<const char*>(&rec), sizeof(Record));
+    rec_count++;
     return id;
 }
 
@@ -132,13 +139,13 @@ int main() {
             int bucket = hash_index(index) % NUM_BUCKETS;
             int cur = get_bucket_head(bucket);
             int prev = -1;
+            Record prev_rec;
             while (cur != -1) {
                 Record rec = read_record(cur);
                 if (rec.active && index_equal(rec, index) && rec.value == value) {
                     if (prev == -1) {
                         set_bucket_head(bucket, rec.next);
                     } else {
-                        Record prev_rec = read_record(prev);
                         prev_rec.next = rec.next;
                         write_record(prev, prev_rec);
                     }
@@ -148,6 +155,7 @@ int main() {
                     break;
                 }
                 prev = cur;
+                prev_rec = rec;
                 cur = rec.next;
             }
         } else if (cmd == "find") {
