@@ -5,6 +5,8 @@
 #include <cstring>
 #include <algorithm>
 
+#pragma GCC optimize("O3")
+
 using namespace std;
 
 const int NUM_BUCKETS = 100003;
