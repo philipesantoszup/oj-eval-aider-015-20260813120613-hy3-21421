@@ -7,9 +7,12 @@
 
 using namespace std;
 
-const int NUM_BUCKETS = 10000;
+const int NUM_BUCKETS = 100003;
 const char* DIR_FILE = "dir.dat";
 const char* REC_FILE = "records.dat";
+
+static char dir_buf[65536];
+static char rec_buf[65536];
 
 #pragma pack(push, 1)
 struct Record {
@@ -23,9 +26,10 @@ struct Record {
 static_assert(sizeof(Record) == 76, "Record size mismatch");
 
 unsigned int hash_index(const string& s) {
-    unsigned int h = 0;
+    unsigned int h = 2166136261u;
     for (char c : s) {
-        h = h * 31 + (unsigned char)c;
+        h ^= (unsigned char)c;
+        h *= 16777619u;
     }
     return h;
 }
@@ -41,6 +45,7 @@ fstream rec_file;
 fstream dir_file;
 
 void init_files() {
+    dir_file.rdbuf()->pubsetbuf(dir_buf, sizeof(dir_buf));
     dir_file.open(DIR_FILE, ios::in | ios::out | ios::binary);
     if (!dir_file) {
         fstream create(DIR_FILE, ios::out | ios::binary);
@@ -51,12 +56,15 @@ void init_files() {
         create.close();
         dir_file.open(DIR_FILE, ios::in | ios::out | ios::binary);
     }
+    rec_file.rdbuf()->pubsetbuf(rec_buf, sizeof(rec_buf));
     rec_file.open(REC_FILE, ios::in | ios::out | ios::binary);
     if (!rec_file) {
         fstream create(REC_FILE, ios::out | ios::binary);
         create.close();
         rec_file.open(REC_FILE, ios::in | ios::out | ios::binary);
     }
+    dir_file.clear();
+    rec_file.clear();
 }
 
 int get_bucket_head(int bucket) {
@@ -165,5 +173,7 @@ int main() {
             }
         }
     }
+    dir_file.close();
+    rec_file.close();
     return 0;
 }
