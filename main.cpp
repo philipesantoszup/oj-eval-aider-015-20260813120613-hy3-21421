@@ -1,9 +1,13 @@
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <vector>
 #include <cstring>
 #include <algorithm>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <cstdio>
 
 #pragma GCC optimize("O3")
 
@@ -12,9 +16,6 @@ using namespace std;
 const int NUM_BUCKETS = 100003;
 const char* DIR_FILE = "dir.dat";
 const char* REC_FILE = "records.dat";
-
-static char dir_buf[262144];
-static char rec_buf[262144];
 
 #pragma pack(push, 1)
 struct Record {
@@ -43,39 +44,34 @@ bool index_equal(const Record& rec, const string& index) {
     return strncmp(rec.index, index.c_str(), index.size()) == 0 && rec.index[index.size()] == '\0';
 }
 
-fstream rec_file;
-fstream dir_file;
+int rec_fd = -1;
+int dir_fd = -1;
 
 vector<int> dir_heads(NUM_BUCKETS, -1);
 int rec_count = 0;
 
 void init_files() {
-    dir_file.rdbuf()->pubsetbuf(dir_buf, sizeof(dir_buf));
-    dir_file.open(DIR_FILE, ios::in | ios::out | ios::binary);
-    if (!dir_file) {
-        fstream create(DIR_FILE, ios::out | ios::binary);
-        int init = -1;
-        for (int i = 0; i < NUM_BUCKETS; ++i) {
-            create.write(reinterpret_cast<const char*>(&init), sizeof(int));
-        }
-        create.close();
-        dir_file.open(DIR_FILE, ios::in | ios::out | ios::binary);
+    dir_fd = open(DIR_FILE, O_RDWR | O_CREAT, 0644);
+    if (dir_fd < 0) {
+        perror("open dir");
+        exit(1);
     }
-    dir_file.read(reinterpret_cast<char*>(dir_heads.data()), NUM_BUCKETS * sizeof(int));
-    dir_file.clear();
+    struct stat st;
+    fstat(dir_fd, &st);
+    if (st.st_size >= (off_t)(NUM_BUCKETS * sizeof(int))) {
+        pread(dir_fd, dir_heads.data(), NUM_BUCKETS * sizeof(int), 0);
+    } else {
+        fill(dir_heads.begin(), dir_heads.end(), -1);
+        pwrite(dir_fd, dir_heads.data(), NUM_BUCKETS * sizeof(int), 0);
+    }
 
-    rec_file.rdbuf()->pubsetbuf(rec_buf, sizeof(rec_buf));
-    rec_file.open(REC_FILE, ios::in | ios::out | ios::binary);
-    if (!rec_file) {
-        fstream create(REC_FILE, ios::out | ios::binary);
-        create.close();
-        rec_file.open(REC_FILE, ios::in | ios::out | ios::binary);
+    rec_fd = open(REC_FILE, O_RDWR | O_CREAT, 0644);
+    if (rec_fd < 0) {
+        perror("open rec");
+        exit(1);
     }
-    rec_file.seekg(0, ios::end);
-    streampos len = rec_file.tellg();
-    rec_count = static_cast<int>(len / sizeof(Record));
-    rec_file.seekg(0, ios::beg);
-    rec_file.clear();
+    fstat(rec_fd, &st);
+    rec_count = static_cast<int>(st.st_size / sizeof(Record));
 }
 
 int get_bucket_head(int bucket) {
@@ -84,28 +80,23 @@ int get_bucket_head(int bucket) {
 
 void set_bucket_head(int bucket, int head) {
     dir_heads[bucket] = head;
-    dir_file.seekp(bucket * sizeof(int), ios::beg);
-    dir_file.write(reinterpret_cast<const char*>(&head), sizeof(int));
 }
 
 int append_record(const Record& rec) {
     int id = rec_count;
-    rec_file.seekp(id * sizeof(Record), ios::beg);
-    rec_file.write(reinterpret_cast<const char*>(&rec), sizeof(Record));
+    pwrite(rec_fd, &rec, sizeof(Record), id * sizeof(Record));
     rec_count++;
     return id;
 }
 
 Record read_record(int id) {
     Record rec;
-    rec_file.seekg(id * sizeof(Record), ios::beg);
-    rec_file.read(reinterpret_cast<char*>(&rec), sizeof(Record));
+    pread(rec_fd, &rec, sizeof(Record), id * sizeof(Record));
     return rec;
 }
 
 void write_record(int id, const Record& rec) {
-    rec_file.seekp(id * sizeof(Record), ios::beg);
-    rec_file.write(reinterpret_cast<const char*>(&rec), sizeof(Record));
+    pwrite(rec_fd, &rec, sizeof(Record), id * sizeof(Record));
 }
 
 int main() {
@@ -183,7 +174,9 @@ int main() {
             }
         }
     }
-    dir_file.close();
-    rec_file.close();
+
+    pwrite(dir_fd, dir_heads.data(), NUM_BUCKETS * sizeof(int), 0);
+    close(rec_fd);
+    close(dir_fd);
     return 0;
 }
