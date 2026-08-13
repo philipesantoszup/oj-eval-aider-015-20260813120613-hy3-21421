@@ -2,3 +2,4 @@ CMakeFiles/
 CMakeCache.txt
 bucket_*.dat
 code
+.aider*
