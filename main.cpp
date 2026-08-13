@@ -4,7 +4,6 @@
 #include <vector>
 #include <cstring>
 #include <algorithm>
-#include <sstream>
 
 using namespace std;
 
@@ -29,6 +28,13 @@ unsigned int hash_index(const string& s) {
         h = h * 31 + (unsigned char)c;
     }
     return h;
+}
+
+bool index_equal(const Record& rec, const string& index) {
+    if (index.size() >= 64) {
+        return memcmp(rec.index, index.c_str(), 64) == 0;
+    }
+    return strncmp(rec.index, index.c_str(), index.size()) == 0 && rec.index[index.size()] == '\0';
 }
 
 fstream rec_file;
@@ -63,7 +69,6 @@ int get_bucket_head(int bucket) {
 void set_bucket_head(int bucket, int head) {
     dir_file.seekp(bucket * sizeof(int), ios::beg);
     dir_file.write(reinterpret_cast<const char*>(&head), sizeof(int));
-    dir_file.flush();
 }
 
 int append_record(const Record& rec) {
@@ -71,7 +76,6 @@ int append_record(const Record& rec) {
     streampos pos = rec_file.tellp();
     int id = static_cast<int>(pos / sizeof(Record));
     rec_file.write(reinterpret_cast<const char*>(&rec), sizeof(Record));
-    rec_file.flush();
     return id;
 }
 
@@ -85,7 +89,6 @@ Record read_record(int id) {
 void write_record(int id, const Record& rec) {
     rec_file.seekp(id * sizeof(Record), ios::beg);
     rec_file.write(reinterpret_cast<const char*>(&rec), sizeof(Record));
-    rec_file.flush();
 }
 
 int main() {
@@ -96,17 +99,13 @@ int main() {
 
     int n;
     if (!(cin >> n)) return 0;
-    cin.ignore();
 
     for (int i = 0; i < n; ++i) {
-        string line;
-        if (!getline(cin, line)) break;
-        istringstream iss(line);
         string cmd;
-        iss >> cmd;
+        if (!(cin >> cmd)) break;
         if (cmd == "insert") {
             string index; int value;
-            iss >> index >> value;
+            cin >> index >> value;
             int bucket = hash_index(index) % NUM_BUCKETS;
             int head = get_bucket_head(bucket);
             Record rec;
@@ -119,27 +118,37 @@ int main() {
             set_bucket_head(bucket, new_id);
         } else if (cmd == "delete") {
             string index; int value;
-            iss >> index >> value;
+            cin >> index >> value;
             int bucket = hash_index(index) % NUM_BUCKETS;
             int cur = get_bucket_head(bucket);
+            int prev = -1;
             while (cur != -1) {
                 Record rec = read_record(cur);
-                if (rec.active && strncmp(rec.index, index.c_str(), 64) == 0 && rec.value == value) {
+                if (rec.active && index_equal(rec, index) && rec.value == value) {
+                    if (prev == -1) {
+                        set_bucket_head(bucket, rec.next);
+                    } else {
+                        Record prev_rec = read_record(prev);
+                        prev_rec.next = rec.next;
+                        write_record(prev, prev_rec);
+                    }
                     rec.active = 0;
+                    rec.next = -1;
                     write_record(cur, rec);
                     break;
                 }
+                prev = cur;
                 cur = rec.next;
             }
         } else if (cmd == "find") {
             string index;
-            iss >> index;
+            cin >> index;
             int bucket = hash_index(index) % NUM_BUCKETS;
             int cur = get_bucket_head(bucket);
             vector<int> values;
             while (cur != -1) {
                 Record rec = read_record(cur);
-                if (rec.active && strncmp(rec.index, index.c_str(), 64) == 0) {
+                if (rec.active && index_equal(rec, index)) {
                     values.push_back(rec.value);
                 }
                 cur = rec.next;
